@@ -82,6 +82,11 @@ static void display(Pool *pool, ExprIdx input) {
     }
 }
 
+static void displayln(Pool *pool, ExprIdx input) {
+    display(pool, input);
+    printf("\n");
+}
+
 static ExprIdx replace(Pool *pool, ExprIdx input, const char *variable,
                        ExprIdx argument) {
     switch (pool->tags[input]) {
@@ -199,19 +204,13 @@ int main() {
                              pool_push_add(&pool, pool_push_var(&pool, "x"),
                                            pool_push_var(&pool, "y")));
 
-    display(&pool, f);
-
-    printf("\n");
+    displayln(&pool, f);
 
     ExprIdx e = call(&pool, f, (double[]){1.0, 2.0});
 
-    display(&pool, e);
-
-    printf("\n");
+    displayln(&pool, e);
 
     e = simplify(&pool, e);
 
-    display(&pool, e);
-
-    printf("\n");
+    displayln(&pool, e);
 }
