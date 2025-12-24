@@ -6,158 +6,28 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef uint32_t ExprIdx;
-
-typedef enum : uint8_t {
-    EXPR_VARIABLE,
-    EXPR_CONSTANT,
-    EXPR_FUNCTION,
-    EXPR_ADD,
-    EXPR_SUB,
-    EXPR_MUL,
-    EXPR_DIV,
-} ExprTag;
-
-typedef struct {
-    const char *name;
-    ExprIdx first_parameter;
-    uint32_t parameters_len;
-    ExprIdx body;
-} ExprFunction;
-
-typedef struct {
-    ExprIdx lhs;
-    ExprIdx rhs;
-} ExprBinary;
-
-typedef union {
-    const char *variable;
-    double constant;
-    ExprFunction function;
-    ExprBinary binary;
-} ExprPayload;
-
-typedef struct {
-    ExprTag *tags;
-    ExprPayload *payloads;
-    size_t len;
-    size_t capacity;
-} Pool;
-
-static ExprIdx pool_push_expr(Pool *pool, ExprTag tag, ExprPayload payload) {
-    if (pool->len + 1 > pool->capacity) {
-        size_t new_cap = pool->capacity ? pool->capacity * 2 : 4;
-
-        pool->tags = realloc(pool->tags, sizeof(*pool->tags) * new_cap);
-
-        pool->payloads =
-            realloc(pool->payloads, sizeof(*pool->payloads) * new_cap);
-
-        if (pool->tags == NULL || pool->payloads == NULL) {
-            fprintf(stderr, "error: out of memory\n");
-
-            exit(1);
-        }
-
-        pool->capacity = new_cap;
-    }
-
-    pool->tags[pool->len] = tag;
-    pool->payloads[pool->len] = payload;
-
-    return pool->len++;
-}
-
-static inline void pool_reset(Pool *pool) { pool->len = 0; }
-
-static inline void pool_free(Pool *pool) {
-    free(pool->tags);
-    free(pool->payloads);
-    pool->capacity = 0;
-    pool->len = 0;
-}
-
-static inline ExprIdx variable(Pool *pool, const char *variable) {
-    return pool_push_expr(pool, EXPR_VARIABLE,
-                          (ExprPayload){.variable = variable});
-}
-
-static inline ExprIdx constant(Pool *pool, double constant) {
-    return pool_push_expr(pool, EXPR_CONSTANT,
-                          (ExprPayload){.constant = constant});
-}
-
-static inline ExprIdx add(Pool *pool, ExprIdx lhs, ExprIdx rhs) {
-    return pool_push_expr(pool, EXPR_ADD,
-                          (ExprPayload){.binary = {
-                                            .lhs = lhs,
-                                            .rhs = rhs,
-                                        }});
-}
-
-static inline ExprIdx sub(Pool *pool, ExprIdx lhs, ExprIdx rhs) {
-    return pool_push_expr(pool, EXPR_SUB,
-                          (ExprPayload){.binary = {
-                                            .lhs = lhs,
-                                            .rhs = rhs,
-                                        }});
-}
-
-static inline ExprIdx mul(Pool *pool, ExprIdx lhs, ExprIdx rhs) {
-    return pool_push_expr(pool, EXPR_MUL,
-                          (ExprPayload){.binary = {
-                                            .lhs = lhs,
-                                            .rhs = rhs,
-                                        }});
-}
-
-static inline ExprIdx divide(Pool *pool, ExprIdx lhs, ExprIdx rhs) {
-    return pool_push_expr(pool, EXPR_DIV,
-                          (ExprPayload){.binary = {
-                                            .lhs = lhs,
-                                            .rhs = rhs,
-                                        }});
-}
-
-static ExprIdx function(Pool *pool, const char *name, const char **parameters,
-                        size_t parameters_len, ExprIdx body) {
-    assert(parameters_len != 0 &&
-           "mathematical functions can not have 0 parameters");
-
-    ExprIdx first_parameter = variable(pool, parameters[0]);
-
-    for (size_t i = 1; i < parameters_len; i++) {
-        variable(pool, parameters[i]);
-    }
-
-    return pool_push_expr(
-        pool, EXPR_FUNCTION,
-        (ExprPayload){.function = {.name = name,
-                                   .first_parameter = first_parameter,
-                                   .parameters_len = parameters_len,
-
-                                   .body = body}});
-}
+#include "expr.h"
+#include "pool.h"
 
 static void display(Pool *pool, ExprIdx input) {
     switch (pool->tags[input]) {
-    case EXPR_VARIABLE:
-        printf("%s", pool->payloads[input].variable);
+    case EXPR_VAR:
+        printf("%s", pool->payloads[input].var);
         break;
 
-    case EXPR_CONSTANT:
-        printf("%lg", pool->payloads[input].constant);
+    case EXPR_VAL:
+        printf("%lg", pool->payloads[input].val);
         break;
 
-    case EXPR_FUNCTION: {
-        ExprFunction f = pool->payloads[input].function;
+    case EXPR_FN: {
+        ExprFn f = pool->payloads[input].fn;
 
         printf("%s(", f.name);
 
-        printf("%s", pool->payloads[f.first_parameter].variable);
+        printf("%s", pool->payloads[f.first_parameter].var);
 
         for (size_t i = 1; i < f.parameters_len; i++) {
-            printf(", %s", pool->payloads[f.first_parameter + i].variable);
+            printf(", %s", pool->payloads[f.first_parameter + i].var);
         }
 
         printf(") = ");
@@ -215,8 +85,8 @@ static void display(Pool *pool, ExprIdx input) {
 static ExprIdx replace(Pool *pool, ExprIdx input, const char *variable,
                        ExprIdx argument) {
     switch (pool->tags[input]) {
-    case EXPR_VARIABLE:
-        if (strcmp(pool->payloads[input].variable, variable) == 0) {
+    case EXPR_VAR:
+        if (strcmp(pool->payloads[input].var, variable) == 0) {
             return argument;
         } else {
             return input;
@@ -241,14 +111,14 @@ static ExprIdx replace(Pool *pool, ExprIdx input, const char *variable,
 }
 
 static ExprIdx call(Pool *pool, ExprIdx function_index, double *arguments) {
-    ExprFunction function = pool->payloads[function_index].function;
+    ExprFn function = pool->payloads[function_index].fn;
 
     ExprIdx result = function.body;
 
     for (size_t i = 0; i < function.parameters_len; i++) {
         result = replace(pool, result,
-                         pool->payloads[function.first_parameter + i].variable,
-                         constant(pool, arguments[i]));
+                         pool->payloads[function.first_parameter + i].var,
+                         pool_push_val(pool, arguments[i]));
     }
 
     return result;
@@ -261,12 +131,11 @@ static ExprIdx simplify(Pool *pool, ExprIdx input) {
         ExprIdx lhs = simplify(pool, binary.lhs);
         ExprIdx rhs = simplify(pool, binary.rhs);
 
-        if (pool->tags[lhs] == EXPR_CONSTANT &&
-            pool->tags[rhs] == EXPR_CONSTANT) {
-            return constant(pool, pool->payloads[lhs].constant +
-                                      pool->payloads[rhs].constant);
+        if (pool->tags[lhs] == EXPR_VAL && pool->tags[rhs] == EXPR_VAL) {
+            return pool_push_val(pool, pool->payloads[lhs].val +
+                                           pool->payloads[rhs].val);
         } else if (lhs != binary.lhs || rhs != binary.rhs) {
-            return add(pool, lhs, rhs);
+            return pool_push_add(pool, lhs, rhs);
         } else {
             return input;
         }
@@ -277,12 +146,11 @@ static ExprIdx simplify(Pool *pool, ExprIdx input) {
         ExprIdx lhs = simplify(pool, binary.lhs);
         ExprIdx rhs = simplify(pool, binary.rhs);
 
-        if (pool->tags[lhs] == EXPR_CONSTANT &&
-            pool->tags[rhs] == EXPR_CONSTANT) {
-            return constant(pool, pool->payloads[lhs].constant -
-                                      pool->payloads[rhs].constant);
+        if (pool->tags[lhs] == EXPR_VAL && pool->tags[rhs] == EXPR_VAL) {
+            return pool_push_val(pool, pool->payloads[lhs].val -
+                                           pool->payloads[rhs].val);
         } else if (lhs != binary.lhs || rhs != binary.rhs) {
-            return sub(pool, lhs, rhs);
+            return pool_push_sub(pool, lhs, rhs);
         } else {
             return input;
         }
@@ -293,12 +161,11 @@ static ExprIdx simplify(Pool *pool, ExprIdx input) {
         ExprIdx lhs = simplify(pool, binary.lhs);
         ExprIdx rhs = simplify(pool, binary.rhs);
 
-        if (pool->tags[lhs] == EXPR_CONSTANT &&
-            pool->tags[rhs] == EXPR_CONSTANT) {
-            return constant(pool, pool->payloads[lhs].constant *
-                                      pool->payloads[rhs].constant);
+        if (pool->tags[lhs] == EXPR_VAL && pool->tags[rhs] == EXPR_VAL) {
+            return pool_push_val(pool, pool->payloads[lhs].val *
+                                           pool->payloads[rhs].val);
         } else if (lhs != binary.lhs || rhs != binary.rhs) {
-            return mul(pool, lhs, rhs);
+            return pool_push_mul(pool, lhs, rhs);
         } else {
             return input;
         }
@@ -309,12 +176,11 @@ static ExprIdx simplify(Pool *pool, ExprIdx input) {
         ExprIdx lhs = simplify(pool, binary.lhs);
         ExprIdx rhs = simplify(pool, binary.rhs);
 
-        if (pool->tags[lhs] == EXPR_CONSTANT &&
-            pool->tags[rhs] == EXPR_CONSTANT) {
-            return constant(pool, pool->payloads[lhs].constant /
-                                      pool->payloads[rhs].constant);
+        if (pool->tags[lhs] == EXPR_VAL && pool->tags[rhs] == EXPR_VAL) {
+            return pool_push_val(pool, pool->payloads[lhs].val /
+                                           pool->payloads[rhs].val);
         } else if (lhs != binary.lhs || rhs != binary.rhs) {
-            return divide(pool, lhs, rhs);
+            return pool_push_div(pool, lhs, rhs);
         } else {
             return input;
         }
@@ -329,9 +195,9 @@ static ExprIdx simplify(Pool *pool, ExprIdx input) {
 int main() {
     Pool pool = {0};
 
-    ExprIdx f =
-        function(&pool, "f", (const char *[]){"x", "y"}, 2,
-                 add(&pool, variable(&pool, "x"), variable(&pool, "y")));
+    ExprIdx f = pool_push_fn(&pool, "f", (const char *[]){"x", "y"}, 2,
+                             pool_push_add(&pool, pool_push_var(&pool, "x"),
+                                           pool_push_var(&pool, "y")));
 
     display(&pool, f);
 
