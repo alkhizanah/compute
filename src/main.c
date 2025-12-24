@@ -234,12 +234,12 @@ static ExprIdx replace(Pool *pool, ExprIdx input, const char *variable,
 }
 
 static ExprIdx call(Pool *pool, ExprIdx function_index, double *arguments) {
-    ExprIdx result;
-
     ExprFunction function = pool->payloads[function_index].function;
 
+    ExprIdx result = function.body;
+
     for (size_t i = 0; i < function.parameters_len; i++) {
-        result = replace(pool, function.body,
+        result = replace(pool, result,
                          pool->payloads[function.first_parameter + i].variable,
                          constant(pool, arguments[i]));
     }
@@ -322,14 +322,14 @@ static ExprIdx simplify(Pool *pool, ExprIdx input) {
 int main() {
     Pool pool = {0};
 
-    ExprIdx f = function(&pool, "f", (const char *[]){"x"}, 1,
-                         add(&pool, variable(&pool, "x"), constant(&pool, 2)));
+    ExprIdx f = function(&pool, "f", (const char *[]){"x", "y"}, 2,
+                         add(&pool, variable(&pool, "x"), variable(&pool, "y")));
 
     display(&pool, f);
 
     printf("\n");
 
-    ExprIdx e = call(&pool, f, (double[]){67.0});
+    ExprIdx e = call(&pool, f, (double[]){1.0, 2.0});
 
     display(&pool, e);
 
