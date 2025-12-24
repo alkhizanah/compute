@@ -150,52 +150,59 @@ static void display(Pool *pool, ExprIdx input) {
         break;
 
     case EXPR_FUNCTION: {
-        ExprFunction function = pool->payloads[input].function;
+        ExprFunction f = pool->payloads[input].function;
 
-        printf("%s(", function.name);
+        printf("%s(", f.name);
 
-        printf("%s", pool->payloads[function.first_parameter].variable);
+        printf("%s", pool->payloads[f.first_parameter].variable);
 
-        for (size_t i = 1; i < function.parameters_len; i++) {
-            printf(", %s",
-                   pool->payloads[function.first_parameter + i].variable);
+        for (size_t i = 1; i < f.parameters_len; i++) {
+            printf(", %s", pool->payloads[f.first_parameter + i].variable);
         }
 
         printf(") = ");
 
-        display(pool, function.body);
+        display(pool, f.body);
         break;
     }
 
     case EXPR_ADD: {
-        ExprBinary binary = pool->payloads[input].binary;
-        display(pool, binary.lhs);
+        ExprBinary b = pool->payloads[input].binary;
+        printf("(");
+        display(pool, b.lhs);
         printf(" + ");
-        display(pool, binary.rhs);
+        display(pool, b.rhs);
+        printf(")");
         break;
     }
 
     case EXPR_SUB: {
-        ExprBinary binary = pool->payloads[input].binary;
-        display(pool, binary.lhs);
+        ExprBinary b = pool->payloads[input].binary;
+        printf("(");
+        display(pool, b.lhs);
         printf(" - ");
-        display(pool, binary.rhs);
+        display(pool, b.rhs);
+        printf(")");
         break;
     }
 
     case EXPR_MUL: {
-        ExprBinary binary = pool->payloads[input].binary;
-        display(pool, binary.lhs);
+        ExprBinary b = pool->payloads[input].binary;
+        printf("(");
+        display(pool, b.lhs);
         printf(" * ");
-        display(pool, binary.rhs);
+        display(pool, b.rhs);
+        printf(")");
         break;
     }
 
     case EXPR_DIV: {
-        ExprBinary binary = pool->payloads[input].binary;
-        display(pool, binary.lhs);
+        ExprBinary b = pool->payloads[input].binary;
+        printf("(");
+        display(pool, b.lhs);
         printf(" / ");
-        display(pool, binary.rhs);
+        display(pool, b.rhs);
+        printf(")");
         break;
     }
 
@@ -322,8 +329,9 @@ static ExprIdx simplify(Pool *pool, ExprIdx input) {
 int main() {
     Pool pool = {0};
 
-    ExprIdx f = function(&pool, "f", (const char *[]){"x", "y"}, 2,
-                         add(&pool, variable(&pool, "x"), variable(&pool, "y")));
+    ExprIdx f =
+        function(&pool, "f", (const char *[]){"x", "y"}, 2,
+                 add(&pool, variable(&pool, "x"), variable(&pool, "y")));
 
     display(&pool, f);
 
