@@ -211,8 +211,20 @@ static ExprIdx simplify(Pool *pool, ExprIdx input) {
         } else {
             return input;
         }
+    }
 
-        break;
+    case EXPR_FN: {
+        ExprFn fn = pool->payloads[input].fn;
+
+        return pool_push_expr(
+            pool, EXPR_FN,
+            (ExprPayload){.fn = {
+                              .name = fn.name,
+                              .name_len = fn.name_len,
+                              .first_parameter = fn.first_parameter,
+                              .parameters_len = fn.parameters_len,
+                              .body = simplify(pool, fn.body),
+                          }});
     }
 
     default:
@@ -225,7 +237,7 @@ int main() {
     Pool pool = {0};
 
     ExprIdx f = parse(&pool, &(Lexer){
-                                 .buffer = "f(x, y) = x * y",
+                                 .buffer = "f(x, y) = x + y / 2 * y * x",
                              });
 
     if (f == INVALID_EXPR_IDX) {
@@ -235,12 +247,4 @@ int main() {
     }
 
     displayln(&pool, f);
-
-    ExprIdx e = call(&pool, f, (double[]){1.0, 2.0});
-
-    displayln(&pool, e);
-
-    e = simplify(&pool, e);
-
-    displayln(&pool, e);
 }
