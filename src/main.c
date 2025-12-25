@@ -58,6 +58,8 @@ static bool exprs_structurally_equal(Pool *pool, ExprIdx lhs, ExprIdx rhs) {
         return exprs_structurally_equal(pool, lhs_payload.unary,
                                         rhs_payload.unary);
     }
+
+    return INVALID_EXPR_IDX;
 }
 
 static ExprIdx simplify(Pool *pool, ExprIdx input) {
