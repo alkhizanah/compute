@@ -8,7 +8,7 @@ int main(int argc, char **argv) {
 
     nob_cc(&cmd);
     nob_cc_flags(&cmd);
-    nob_cc_inputs(&cmd, "src/main.c");
+    nob_cc_inputs(&cmd, "compute.c");
     nob_cc_output(&cmd, "compute");
 
     if (!nob_cmd_run(&cmd))
