@@ -278,9 +278,12 @@ static Token lexer_next(Lexer *lexer) {
 
     default:
         if (isalpha(character) || character == '_') {
-            while (isalnum(lexer->buffer[lexer->index]) ||
-                   lexer->buffer[lexer->index] == '_')
+            if (lexer->buffer[lexer->index] == '_') {
                 lexer->index++;
+
+                while (isalnum(lexer->buffer[lexer->index]))
+                    lexer->index++;
+            }
 
             token.tag = TOK_VAR;
 
@@ -288,7 +291,7 @@ static Token lexer_next(Lexer *lexer) {
         } else if (isdigit(character)) {
             token.tag = TOK_VAL;
 
-            while (isalnum(lexer->buffer[lexer->index]) ||
+            while (isdigit(lexer->buffer[lexer->index]) ||
                    lexer->buffer[lexer->index] == '.') {
                 lexer->index++;
             }
@@ -355,14 +358,28 @@ static ExprIdx parse_unary(Pool *pool, Lexer *lexer) {
 
         double val = strtod(lexer->buffer + val_token.range.start, NULL);
 
-        return pool_push_val(pool, val);
+        if (lexer_peek(lexer).tag == TOK_VAR) {
+            return pool_push_mul(pool, pool_push_val(pool, val),
+                                 parse_unary(pool, lexer));
+        } else {
+            return pool_push_val(pool, val);
+        }
     }
 
     case TOK_VAR: {
         Token var_token = lexer_next(lexer);
 
-        return pool_push_var(pool, lexer->buffer + var_token.range.start,
-                             var_token.range.end - var_token.range.start);
+        if (lexer_peek(lexer).tag == TOK_VAR ||
+            lexer_peek(lexer).tag == TOK_VAL) {
+            return pool_push_mul(
+                pool,
+                pool_push_var(pool, lexer->buffer + var_token.range.start,
+                              var_token.range.end - var_token.range.start),
+                parse_unary(pool, lexer));
+        } else {
+            return pool_push_var(pool, lexer->buffer + var_token.range.start,
+                                 var_token.range.end - var_token.range.start);
+        }
     }
 
     case TOK_OPAREN:
@@ -461,6 +478,10 @@ static ExprIdx simplify(Pool *pool, ExprIdx input) {
         if (pool->tags[lhs] == EXPR_VAL && pool->tags[rhs] == EXPR_VAL) {
             return pool_push_val(pool, pool->payloads[lhs].val -
                                            pool->payloads[rhs].val);
+        } else if (pool->tags[lhs] == EXPR_ADD &&
+                   exprs_structurally_equal(
+                       pool, pool->payloads[lhs].binary.rhs, rhs)) {
+            return pool->payloads[lhs].binary.lhs;
         } else if (lhs != binary.lhs || rhs != binary.rhs) {
             return pool_push_sub(pool, lhs, rhs);
         } else {
