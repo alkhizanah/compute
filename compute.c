@@ -15,7 +15,6 @@ typedef uint32_t ExprIdx;
 typedef enum : uint8_t {
     EXPR_VAR,
     EXPR_VAL,
-    EXPR_FN,
     EXPR_ADD,
     EXPR_SUB,
     EXPR_MUL,
@@ -29,14 +28,6 @@ typedef struct {
 } ExprVar;
 
 typedef struct {
-    const char *name;
-    uint32_t name_len;
-    ExprIdx first_parameter;
-    uint32_t parameters_len;
-    ExprIdx body;
-} ExprFn;
-
-typedef struct {
     ExprIdx lhs;
     ExprIdx rhs;
 } ExprBinary;
@@ -44,7 +35,6 @@ typedef struct {
 typedef union {
     ExprVar var;
     double val;
-    ExprFn fn;
     ExprIdx unary;
     ExprBinary binary;
 } ExprPayload;
@@ -380,75 +370,7 @@ static ExprIdx parse_expr(Pool *pool, Lexer *lexer, Precedence precedence) {
     return lhs;
 }
 
-static ExprIdx parse_fn(Pool *pool, Lexer *lexer, Token fn_name_token) {
-    assert(lexer_next(lexer).tag == TOK_OPAREN);
-
-    Token first_parameter_token = lexer_next(lexer);
-
-    if (first_parameter_token.tag != TOK_VAR) {
-        return INVALID_EXPR_IDX;
-    }
-
-    ExprIdx first_parameter = pool_push_var(
-        pool, lexer->buffer + first_parameter_token.range.start,
-        first_parameter_token.range.end - first_parameter_token.range.start);
-
-    uint32_t parameters_len = 1;
-
-    while (lexer_peek(lexer).tag == TOK_COMMA) {
-        lexer_next(lexer);
-
-        Token parameter_token = lexer_next(lexer);
-
-        if (parameter_token.tag != TOK_VAR) {
-            return INVALID_EXPR_IDX;
-        }
-
-        pool_push_var(pool, lexer->buffer + parameter_token.range.start,
-                      parameter_token.range.end - parameter_token.range.start);
-
-        parameters_len++;
-    }
-
-    if (lexer_next(lexer).tag != TOK_CPAREN) {
-        return INVALID_EXPR_IDX;
-    }
-
-    if (lexer_next(lexer).tag != TOK_EQL) {
-        return INVALID_EXPR_IDX;
-    }
-
-    ExprIdx body = parse_expr(pool, lexer, PR_LOWEST);
-
-    if (body == INVALID_EXPR_IDX) {
-        return INVALID_EXPR_IDX;
-    }
-
-    return pool_push_expr(
-        pool, EXPR_FN,
-        (ExprPayload){
-            .fn = {
-                .name = lexer->buffer + fn_name_token.range.start,
-                .name_len = fn_name_token.range.end - fn_name_token.range.start,
-                .first_parameter = first_parameter,
-                .parameters_len = parameters_len,
-                .body = body,
-            }});
-}
-
 ExprIdx parse(Pool *pool, Lexer *lexer) {
-    if (lexer_peek(lexer).tag == TOK_VAR) {
-        size_t index = lexer->index;
-
-        Token fn_name = lexer_next(lexer);
-
-        if (lexer_peek(lexer).tag == TOK_OPAREN) {
-            return parse_fn(pool, lexer, fn_name);
-        } else {
-            lexer->index = index;
-        }
-    }
-
     return parse_expr(pool, lexer, PR_LOWEST);
 }
 
@@ -483,13 +405,6 @@ static bool exprs_structurally_equal(Pool *pool, ExprIdx lhs, ExprIdx rhs) {
                              rhs_payload.var.name, rhs_payload.var.name_len);
     case EXPR_VAL:
         return lhs_payload.val == rhs_payload.val;
-
-    case EXPR_FN:
-        if (lhs_payload.fn.parameters_len != rhs_payload.fn.parameters_len)
-            return false;
-
-        return exprs_structurally_equal(pool, lhs_payload.fn.body,
-                                        rhs_payload.fn.body);
 
     case EXPR_ADD:
     case EXPR_SUB:
@@ -586,20 +501,6 @@ static ExprIdx simplify(Pool *pool, ExprIdx input) {
         }
     }
 
-    case EXPR_FN: {
-        ExprFn fn = pool->payloads[input].fn;
-
-        return pool_push_expr(
-            pool, EXPR_FN,
-            (ExprPayload){.fn = {
-                              .name = fn.name,
-                              .name_len = fn.name_len,
-                              .first_parameter = fn.first_parameter,
-                              .parameters_len = fn.parameters_len,
-                              .body = simplify(pool, fn.body),
-                          }});
-    }
-
     default:
         return input;
         break;
@@ -616,26 +517,6 @@ static void display(Pool *pool, ExprIdx input) {
     case EXPR_VAL:
         printf("%lg", pool->payloads[input].val);
         break;
-
-    case EXPR_FN: {
-        ExprFn f = pool->payloads[input].fn;
-
-        printf("%.*s(", (int)f.name_len, f.name);
-
-        printf("%.*s", (int)pool->payloads[f.first_parameter].var.name_len,
-               pool->payloads[f.first_parameter].var.name);
-
-        for (size_t i = 1; i < f.parameters_len; i++) {
-            printf(", %.*s",
-                   (int)pool->payloads[f.first_parameter + i].var.name_len,
-                   pool->payloads[f.first_parameter + i].var.name);
-        }
-
-        printf(") = ");
-
-        display(pool, f.body);
-        break;
-    }
 
     case EXPR_ADD: {
         ExprBinary b = pool->payloads[input].binary;
@@ -726,33 +607,39 @@ static ExprIdx replace(Pool *pool, ExprIdx input, ExprVar var,
     }
 }
 
-static ExprIdx call(Pool *pool, ExprIdx function_index, double *arguments) {
-    ExprFn function = pool->payloads[function_index].fn;
-
-    ExprIdx result = function.body;
-
-    for (size_t i = 0; i < function.parameters_len; i++) {
-        result = replace(pool, result,
-                         pool->payloads[function.first_parameter + i].var,
-                         pool_push_val(pool, arguments[i]));
+static ExprIdx replace_multiple(Pool *pool, ExprIdx input, ExprVar *vars,
+                                ExprIdx *arguments, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        input = replace(pool, input, vars[i], arguments[i]);
     }
 
-    return result;
+    return input;
 }
 
 int main() {
     Pool pool = {0};
 
-    ExprIdx f = parse(&pool, &(Lexer){
-                                 .buffer = "f(x, y) = x - y + y",
-                             });
+    ExprIdx expr = parse(&pool, &(Lexer){
+                                    .buffer = "x - y + y",
+                                });
 
-    if (f == INVALID_EXPR_IDX) {
+    if (expr == INVALID_EXPR_IDX) {
         fprintf(stderr, "error: invalid expression");
 
         return 1;
     }
 
-    displayln(&pool, f);
-    displayln(&pool, simplify(&pool, f));
+    displayln(&pool, expr);
+
+    expr = replace_multiple(
+        &pool, expr,
+        (ExprVar[]){(ExprVar){.name = "x", .name_len = 1},
+                    (ExprVar){.name = "y", .name_len = 1}},
+        (ExprIdx[]){pool_push_val(&pool, 3), pool_push_val(&pool, 4)}, 2);
+
+    displayln(&pool, expr);
+
+    expr = simplify(&pool, expr);
+
+    displayln(&pool, expr);
 }
