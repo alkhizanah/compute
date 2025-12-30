@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "linenoise.c"
+
 typedef uint32_t ExprIdx;
 
 #define INVALID_EXPR_IDX (UINT32_MAX)
@@ -76,6 +78,63 @@ typedef struct {
     size_t capacity;
 } Pool;
 
+static bool strings_equal(const char *lhs, uint32_t lhs_len, const char *rhs,
+                          uint32_t rhs_len) {
+
+    if (lhs == rhs)
+        return true;
+
+    if (lhs_len != rhs_len)
+        return false;
+
+    return strncmp(lhs, rhs, lhs_len) == 0;
+}
+
+// This doesn't mean that they do not simplify into eachother, meaning (2 + 2)
+// != 4 structurally
+static bool exprs_structurally_equal(Pool *pool, ExprIdx lhs, ExprIdx rhs) {
+    if (lhs == rhs)
+        return true;
+
+    if (pool->tags[lhs] != pool->tags[rhs])
+        return false;
+
+    ExprPayload lhs_payload = pool->payloads[lhs];
+    ExprPayload rhs_payload = pool->payloads[rhs];
+
+    switch (pool->tags[lhs]) {
+    case EXPR_VAR:
+
+        return strings_equal(lhs_payload.var.name, lhs_payload.var.name_len,
+                             rhs_payload.var.name, rhs_payload.var.name_len);
+    case EXPR_VAL:
+        return lhs_payload.val == rhs_payload.val;
+
+    case EXPR_ADD:
+    case EXPR_SUB:
+    case EXPR_MUL:
+    case EXPR_DIV:
+        return exprs_structurally_equal(pool, lhs_payload.binary.lhs,
+                                        rhs_payload.binary.lhs) &&
+               exprs_structurally_equal(pool, lhs_payload.binary.rhs,
+                                        rhs_payload.binary.rhs);
+
+    case EXPR_NEG:
+        return exprs_structurally_equal(pool, lhs_payload.unary,
+                                        rhs_payload.unary);
+    }
+
+    return false;
+}
+
+static inline bool token_is(const char *buffer, Token token,
+                            const char *value) {
+    return token.tag != TOK_INVALID &&
+           strings_equal(buffer + token.range.start,
+                         token.range.end - token.range.start, value,
+                         strlen(value));
+}
+
 static inline ExprIdx pool_push_expr(Pool *pool, ExprTag tag,
                                      ExprPayload payload) {
     if (pool->len + 1 > pool->capacity) {
@@ -101,8 +160,6 @@ static inline ExprIdx pool_push_expr(Pool *pool, ExprTag tag,
 
     return pool->len++;
 }
-
-static inline void pool_reset(Pool *pool) { pool->len = 0; }
 
 static inline void pool_free(Pool *pool) {
     free(pool->tags);
@@ -159,6 +216,7 @@ static inline ExprIdx pool_push_div(Pool *pool, ExprIdx lhs, ExprIdx rhs) {
 static inline ExprIdx pool_push_neg(Pool *pool, ExprIdx unary) {
     return pool_push_expr(pool, EXPR_NEG, (ExprPayload){.unary = unary});
 }
+
 static Token lexer_next(Lexer *lexer) {
     while (isspace(lexer->buffer[lexer->index]))
         lexer->index++;
@@ -374,55 +432,6 @@ ExprIdx parse(Pool *pool, Lexer *lexer) {
     return parse_expr(pool, lexer, PR_LOWEST);
 }
 
-static bool strings_equal(const char *lhs, uint32_t lhs_len, const char *rhs,
-                          uint32_t rhs_len) {
-
-    if (lhs == rhs)
-        return true;
-
-    if (lhs_len != rhs_len)
-        return false;
-
-    return strncmp(lhs, rhs, lhs_len) == 0;
-}
-
-// This doesn't mean that they do not simplify into eachother, meaning (2 + 2)
-// != 4 structurally
-static bool exprs_structurally_equal(Pool *pool, ExprIdx lhs, ExprIdx rhs) {
-    if (lhs == rhs)
-        return true;
-
-    if (pool->tags[lhs] != pool->tags[rhs])
-        return false;
-
-    ExprPayload lhs_payload = pool->payloads[lhs];
-    ExprPayload rhs_payload = pool->payloads[rhs];
-
-    switch (pool->tags[lhs]) {
-    case EXPR_VAR:
-
-        return strings_equal(lhs_payload.var.name, lhs_payload.var.name_len,
-                             rhs_payload.var.name, rhs_payload.var.name_len);
-    case EXPR_VAL:
-        return lhs_payload.val == rhs_payload.val;
-
-    case EXPR_ADD:
-    case EXPR_SUB:
-    case EXPR_MUL:
-    case EXPR_DIV:
-        return exprs_structurally_equal(pool, lhs_payload.binary.lhs,
-                                        rhs_payload.binary.lhs) &&
-               exprs_structurally_equal(pool, lhs_payload.binary.rhs,
-                                        rhs_payload.binary.rhs);
-
-    case EXPR_NEG:
-        return exprs_structurally_equal(pool, lhs_payload.unary,
-                                        rhs_payload.unary);
-    }
-
-    return false;
-}
-
 static ExprIdx simplify(Pool *pool, ExprIdx input) {
     switch (pool->tags[input]) {
     case EXPR_ADD: {
@@ -567,7 +576,7 @@ static void display(Pool *pool, ExprIdx input) {
     }
 
     default:
-        printf("UNREACHABLE");
+        assert(false && "UNREACHABLE");
         break;
     }
 }
@@ -616,30 +625,106 @@ static ExprIdx replace_multiple(Pool *pool, ExprIdx input, ExprVar *vars,
     return input;
 }
 
-int main() {
-    Pool pool = {0};
+void completion(const char *buf, linenoiseCompletions *lc) {
+    (void)buf;
+    (void)lc;
+}
 
-    ExprIdx expr = parse(&pool, &(Lexer){
-                                    .buffer = "x - y + y",
-                                });
+char *hints(const char *buf, int *color, int *bold) {
+    (void)buf;
+    (void)color;
+    (void)bold;
+    return NULL;
+}
 
-    if (expr == INVALID_EXPR_IDX) {
-        fprintf(stderr, "error: invalid expression");
+const char *find_history_file(void) {
+#ifdef _WIN32
+    const char *home_dir = getenv("USERPROFILE");
+#else
+    const char *home_dir = getenv("HOME");
+#endif
 
-        return 1;
+    const char *history_file_name = ".compute_history";
+
+    if (home_dir != NULL) {
+        size_t home_dir_len = strlen(home_dir);
+
+        char *history_file_path = malloc(
+            sizeof(char) * (strlen(home_dir) + 1 + strlen(history_file_name)));
+
+        strcpy(history_file_path, home_dir);
+#ifdef _WIN32
+        strcpy(history_file_path + home_dir_len, "\\");
+
+#else
+        strcpy(history_file_path + home_dir_len, "/");
+#endif
+        strcpy(history_file_path + home_dir_len + 1, history_file_name);
+
+        return history_file_path;
     }
 
-    displayln(&pool, expr);
+    return history_file_name;
+}
 
-    expr = replace_multiple(
-        &pool, expr,
-        (ExprVar[]){(ExprVar){.name = "x", .name_len = 1},
-                    (ExprVar){.name = "y", .name_len = 1}},
-        (ExprIdx[]){pool_push_val(&pool, 3), pool_push_val(&pool, 4)}, 2);
+int main() {
+    Lexer lexer;
 
-    displayln(&pool, expr);
+    Pool pool = {0};
 
-    expr = simplify(&pool, expr);
+    linenoiseSetCompletionCallback(completion);
+    linenoiseSetHintsCallback(hints);
 
-    displayln(&pool, expr);
+    const char *history_file_path = find_history_file();
+
+    linenoiseHistoryLoad(history_file_path);
+
+    while (true) {
+        const char *line = linenoise(":> ");
+
+        if (line == NULL)
+            break;
+
+        linenoiseHistoryAdd(line);
+
+        lexer.buffer = line;
+        lexer.index = 0;
+
+        // Cleanse the pool if it has elements more than 4096, to not leak too
+        // much memory, otherwise reuse the capacity
+        if (pool.capacity > 4096) {
+            pool_free(&pool);
+        } else {
+            pool.len = 0;
+        }
+
+        if (lexer.buffer[lexer.index] == ':') {
+            lexer.index++;
+
+            Token command = lexer_next(&lexer);
+
+            if (token_is(lexer.buffer, command, "bind")) {
+                printf("todo: binding variables is unimplemented yet\n");
+            } else {
+                printf("error: unrecognized command: %.*s\n",
+                       (int)(command.range.end - command.range.start),
+                       lexer.buffer + command.range.start);
+            }
+
+            continue;
+        }
+
+        while (lexer_peek(&lexer).tag != TOK_EOF) {
+            ExprIdx expr = parse(&pool, &lexer);
+
+            if (expr == INVALID_EXPR_IDX)
+                break;
+
+            printf("<- ");
+
+            displayln(&pool, simplify(&pool, expr));
+        }
+    }
+
+    linenoiseHistorySave(history_file_path);
 }
