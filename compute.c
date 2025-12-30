@@ -682,8 +682,12 @@ int main() {
     while (true) {
         const char *line = linenoise(":> ");
 
-        if (line == NULL)
-            break;
+        if (line == NULL) {
+            if (errno == EAGAIN)
+                continue;
+            else if (errno == ENOENT)
+                break;
+        }
 
         linenoiseHistoryAdd(line);
 
