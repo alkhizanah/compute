@@ -1,3 +1,3 @@
 # Compute
 
-A calculator that defines calculations to be transformations of a mathematical abstract tree
+An attempt to make a computer algebra system
