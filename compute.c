@@ -467,12 +467,18 @@ static ExprIdx simplify(Pool *pool, ExprIdx input) {
         if (pool->tags[lhs] == EXPR_VAL && pool->tags[rhs] == EXPR_VAL) {
             return pool_push_val(pool, pool->payloads[lhs].val +
                                            pool->payloads[rhs].val);
+        } else if (exprs_structurally_equal(pool, lhs, rhs)) {
+            return pool_push_mul(pool, pool_push_val(pool, 2.0), rhs);
+        } else if (pool->tags[lhs] == EXPR_VAL &&
+                   pool->payloads[lhs].val == 0) {
+            return rhs;
+        } else if (pool->tags[rhs] == EXPR_VAL &&
+                   pool->payloads[rhs].val == 0) {
+            return lhs;
         } else if (pool->tags[lhs] == EXPR_SUB &&
                    exprs_structurally_equal(
                        pool, pool->payloads[lhs].binary.rhs, rhs)) {
             return pool->payloads[lhs].binary.lhs;
-        } else if (exprs_structurally_equal(pool, lhs, rhs)) {
-            return pool_push_mul(pool, pool_push_val(pool, 2.0), rhs);
         } else if (pool->tags[lhs] == EXPR_MUL) {
             ExprBinary mul = pool->payloads[lhs].binary;
 
@@ -510,10 +516,18 @@ static ExprIdx simplify(Pool *pool, ExprIdx input) {
         if (pool->tags[lhs] == EXPR_VAL && pool->tags[rhs] == EXPR_VAL) {
             return pool_push_val(pool, pool->payloads[lhs].val -
                                            pool->payloads[rhs].val);
+        } else if (exprs_structurally_equal(pool, lhs, rhs)) {
+            return pool_push_val(pool, 0.0);
         } else if (pool->tags[lhs] == EXPR_ADD &&
                    exprs_structurally_equal(
                        pool, pool->payloads[lhs].binary.rhs, rhs)) {
             return pool->payloads[lhs].binary.lhs;
+        } else if (pool->tags[lhs] == EXPR_VAL &&
+                   pool->payloads[lhs].val == 0) {
+            return pool_push_neg(pool, rhs);
+        } else if (pool->tags[rhs] == EXPR_VAL &&
+                   pool->payloads[rhs].val == 0) {
+            return lhs;
         } else if (pool->tags[lhs] == EXPR_MUL) {
             ExprBinary mul = pool->payloads[lhs].binary;
 
@@ -716,9 +730,17 @@ static void display(Pool *pool, ExprIdx input) {
 
     case EXPR_NEG: {
         ExprIdx u = pool->payloads[input].unary;
-        printf("-(");
-        display(pool, u);
-        printf(")");
+
+        printf("-");
+
+        if (is_binary_expr(pool, u)) {
+            printf("(");
+            display(pool, u);
+            printf(")");
+        } else {
+            display(pool, u);
+        }
+
         break;
     }
 
