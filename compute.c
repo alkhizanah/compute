@@ -135,6 +135,13 @@ static inline bool token_is(const char *buffer, Token token,
                          strlen(value));
 }
 
+static bool is_binary_expr(Pool *pool, ExprIdx input) {
+    ExprTag tag = pool->tags[input];
+
+    return ((tag == EXPR_ADD) | (tag == EXPR_SUB) | (tag == EXPR_MUL) |
+            (tag == EXPR_DIV)) != 0;
+}
+
 static inline ExprIdx pool_push_expr(Pool *pool, ExprTag tag,
                                      ExprPayload payload) {
     if (pool->len + 1 > pool->capacity) {
@@ -550,41 +557,97 @@ static void display(Pool *pool, ExprIdx input) {
 
     case EXPR_ADD: {
         ExprBinary b = pool->payloads[input].binary;
-        printf("(");
-        display(pool, b.lhs);
+
+        if (pool->tags[b.lhs] == EXPR_MUL || pool->tags[b.lhs] == EXPR_DIV) {
+            printf("(");
+            display(pool, b.lhs);
+            printf(")");
+        } else {
+            display(pool, b.lhs);
+        }
+
         printf(" + ");
-        display(pool, b.rhs);
-        printf(")");
+
+        if (pool->tags[b.rhs] == EXPR_MUL || pool->tags[b.rhs] == EXPR_DIV) {
+            printf("(");
+            display(pool, b.rhs);
+            printf(")");
+        } else {
+            display(pool, b.rhs);
+        }
+
         break;
     }
 
     case EXPR_SUB: {
         ExprBinary b = pool->payloads[input].binary;
-        printf("(");
-        display(pool, b.lhs);
+
+        if (pool->tags[b.lhs] == EXPR_MUL || pool->tags[b.lhs] == EXPR_DIV) {
+            printf("(");
+            display(pool, b.lhs);
+            printf(")");
+        } else {
+            display(pool, b.lhs);
+        }
+
         printf(" - ");
-        display(pool, b.rhs);
-        printf(")");
+
+        if (is_binary_expr(pool, b.rhs)) {
+            printf("(");
+            display(pool, b.rhs);
+            printf(")");
+        } else {
+            display(pool, b.rhs);
+        }
+
         break;
     }
 
     case EXPR_MUL: {
         ExprBinary b = pool->payloads[input].binary;
-        printf("(");
-        display(pool, b.lhs);
+
+        if (is_binary_expr(pool, b.lhs)) {
+            printf("(");
+            display(pool, b.lhs);
+            printf(")");
+        } else {
+            display(pool, b.lhs);
+        }
+
         printf(" * ");
-        display(pool, b.rhs);
-        printf(")");
+
+        if (is_binary_expr(pool, b.rhs) && pool->tags[b.rhs] != EXPR_MUL) {
+            printf("(");
+            display(pool, b.rhs);
+            printf(")");
+        } else {
+            display(pool, b.rhs);
+        }
+
         break;
     }
 
     case EXPR_DIV: {
         ExprBinary b = pool->payloads[input].binary;
-        printf("(");
-        display(pool, b.lhs);
+
+        if (is_binary_expr(pool, b.lhs)) {
+            printf("(");
+            display(pool, b.lhs);
+            printf(")");
+        } else {
+            display(pool, b.lhs);
+        }
+
         printf(" / ");
-        display(pool, b.rhs);
-        printf(")");
+
+        if (is_binary_expr(pool, b.rhs)) {
+            printf("(");
+            display(pool, b.rhs);
+            printf(")");
+        } else {
+            display(pool, b.rhs);
+        }
+
         break;
     }
 
