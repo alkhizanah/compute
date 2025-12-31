@@ -460,6 +460,7 @@ static ExprIdx simplify(Pool *pool, ExprIdx input) {
     switch (pool->tags[input]) {
     case EXPR_ADD: {
         ExprBinary binary = pool->payloads[input].binary;
+
         ExprIdx lhs = simplify(pool, binary.lhs);
         ExprIdx rhs = simplify(pool, binary.rhs);
 
@@ -470,6 +471,29 @@ static ExprIdx simplify(Pool *pool, ExprIdx input) {
                    exprs_structurally_equal(
                        pool, pool->payloads[lhs].binary.rhs, rhs)) {
             return pool->payloads[lhs].binary.lhs;
+        } else if (exprs_structurally_equal(pool, lhs, rhs)) {
+            return pool_push_mul(pool, pool_push_val(pool, 2.0), rhs);
+        } else if (pool->tags[lhs] == EXPR_MUL) {
+            ExprBinary mul = pool->payloads[lhs].binary;
+
+            double a;
+            ExprIdx b;
+
+            if (pool->tags[mul.lhs] == EXPR_VAL &&
+                exprs_structurally_equal(pool, mul.rhs, rhs)) {
+                a = pool->payloads[mul.lhs].val;
+                b = mul.rhs;
+            } else if (pool->tags[mul.rhs] == EXPR_VAL &&
+                       exprs_structurally_equal(pool, mul.lhs, rhs)) {
+                a = pool->payloads[mul.rhs].val;
+                b = mul.lhs;
+            } else if (lhs != binary.lhs || rhs != binary.rhs) {
+                return pool_push_add(pool, lhs, rhs);
+            } else {
+                return input;
+            }
+
+            return pool_push_mul(pool, pool_push_val(pool, a + 1), b);
         } else if (lhs != binary.lhs || rhs != binary.rhs) {
             return pool_push_add(pool, lhs, rhs);
         } else {
@@ -479,6 +503,7 @@ static ExprIdx simplify(Pool *pool, ExprIdx input) {
 
     case EXPR_SUB: {
         ExprBinary binary = pool->payloads[input].binary;
+
         ExprIdx lhs = simplify(pool, binary.lhs);
         ExprIdx rhs = simplify(pool, binary.rhs);
 
@@ -489,6 +514,27 @@ static ExprIdx simplify(Pool *pool, ExprIdx input) {
                    exprs_structurally_equal(
                        pool, pool->payloads[lhs].binary.rhs, rhs)) {
             return pool->payloads[lhs].binary.lhs;
+        } else if (pool->tags[lhs] == EXPR_MUL) {
+            ExprBinary mul = pool->payloads[lhs].binary;
+
+            double a;
+            ExprIdx b;
+
+            if (pool->tags[mul.lhs] == EXPR_VAL &&
+                exprs_structurally_equal(pool, mul.rhs, rhs)) {
+                a = pool->payloads[mul.lhs].val;
+                b = mul.rhs;
+            } else if (pool->tags[mul.rhs] == EXPR_VAL &&
+                       exprs_structurally_equal(pool, mul.lhs, rhs)) {
+                a = pool->payloads[mul.rhs].val;
+                b = mul.lhs;
+            } else if (lhs != binary.lhs || rhs != binary.rhs) {
+                return pool_push_sub(pool, lhs, rhs);
+            } else {
+                return input;
+            }
+
+            return pool_push_mul(pool, pool_push_val(pool, a - 1), b);
         } else if (lhs != binary.lhs || rhs != binary.rhs) {
             return pool_push_sub(pool, lhs, rhs);
         } else {
@@ -498,12 +544,22 @@ static ExprIdx simplify(Pool *pool, ExprIdx input) {
 
     case EXPR_MUL: {
         ExprBinary binary = pool->payloads[input].binary;
+
         ExprIdx lhs = simplify(pool, binary.lhs);
         ExprIdx rhs = simplify(pool, binary.rhs);
 
-        if (pool->tags[lhs] == EXPR_VAL && pool->tags[rhs] == EXPR_VAL) {
-            return pool_push_val(pool, pool->payloads[lhs].val *
-                                           pool->payloads[rhs].val);
+        if (pool->tags[lhs] == EXPR_VAL) {
+            if (pool->tags[rhs] == EXPR_VAL) {
+                return pool_push_val(pool, pool->payloads[lhs].val *
+                                               pool->payloads[rhs].val);
+            } else if (pool->payloads[lhs].val == 1) {
+                return rhs;
+            } else {
+                return input;
+            }
+        } else if (pool->tags[rhs] == EXPR_VAL &&
+                   pool->payloads[rhs].val == 1) {
+            return lhs;
         } else if (lhs != binary.lhs || rhs != binary.rhs) {
             return pool_push_mul(pool, lhs, rhs);
         } else {
@@ -513,12 +569,19 @@ static ExprIdx simplify(Pool *pool, ExprIdx input) {
 
     case EXPR_DIV: {
         ExprBinary binary = pool->payloads[input].binary;
+
         ExprIdx lhs = simplify(pool, binary.lhs);
         ExprIdx rhs = simplify(pool, binary.rhs);
 
         if (pool->tags[lhs] == EXPR_VAL && pool->tags[rhs] == EXPR_VAL) {
             return pool_push_val(pool, pool->payloads[lhs].val /
                                            pool->payloads[rhs].val);
+        } else if (exprs_structurally_equal(pool, lhs, rhs)) {
+            return pool_push_val(pool, 1.0);
+        } else if (pool->tags[lhs] == EXPR_MUL &&
+                   exprs_structurally_equal(
+                       pool, pool->payloads[lhs].binary.lhs, rhs)) {
+            return pool->payloads[lhs].binary.rhs;
         } else if (lhs != binary.lhs || rhs != binary.rhs) {
             return pool_push_div(pool, lhs, rhs);
         } else {
@@ -681,6 +744,7 @@ static ExprIdx replace(Pool *pool, ExprIdx input, ExprVar var,
         } else {
             return input;
         }
+
     case EXPR_ADD:
     case EXPR_SUB:
     case EXPR_MUL:
@@ -694,6 +758,7 @@ static ExprIdx replace(Pool *pool, ExprIdx input, ExprVar var,
                     .rhs = replace(pool, pool->payloads[input].binary.rhs, var,
                                    argument),
                 }});
+
     default:
         return input;
         break;
@@ -808,9 +873,22 @@ int main() {
             if (expr == INVALID_EXPR_IDX)
                 break;
 
-            printf("<- ");
+            displayln(&pool, expr);
 
-            displayln(&pool, simplify(&pool, expr));
+            ExprIdx next_expr = simplify(&pool, expr);
+
+            while (next_expr != expr) {
+                printf("= ");
+
+                displayln(&pool, next_expr);
+
+                expr = next_expr;
+                next_expr = simplify(&pool, expr);
+            }
+
+            if (lexer_peek(&lexer).tag != TOK_EOF) {
+                printf("\n");
+            }
         }
     }
 
