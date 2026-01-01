@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #include "linenoise.c"
 
@@ -21,6 +22,7 @@ typedef enum : uint8_t {
     EXPR_SUB,
     EXPR_MUL,
     EXPR_DIV,
+    EXPR_POW,
     EXPR_NEG,
 } ExprTag;
 
@@ -53,6 +55,7 @@ typedef enum : uint8_t {
     TOK_MINUS,
     TOK_MULTIPLY,
     TOK_DIVIDE,
+    TOK_POWER,
     TOK_COMMA,
 } TokenTag;
 
@@ -114,6 +117,7 @@ static bool exprs_structurally_equal(Pool *pool, ExprIdx lhs, ExprIdx rhs) {
     case EXPR_SUB:
     case EXPR_MUL:
     case EXPR_DIV:
+    case EXPR_POW:
         return exprs_structurally_equal(pool, lhs_payload.binary.lhs,
                                         rhs_payload.binary.lhs) &&
                exprs_structurally_equal(pool, lhs_payload.binary.rhs,
@@ -139,7 +143,7 @@ static bool is_binary_expr(Pool *pool, ExprIdx input) {
     ExprTag tag = pool->tags[input];
 
     return ((tag == EXPR_ADD) | (tag == EXPR_SUB) | (tag == EXPR_MUL) |
-            (tag == EXPR_DIV)) != 0;
+            (tag == EXPR_DIV) | (tag == EXPR_POW)) != 0;
 }
 
 static inline ExprIdx pool_push_expr(Pool *pool, ExprTag tag,
@@ -220,6 +224,14 @@ static inline ExprIdx pool_push_div(Pool *pool, ExprIdx lhs, ExprIdx rhs) {
                                         }});
 }
 
+static inline ExprIdx pool_push_pow(Pool *pool, ExprIdx lhs, ExprIdx rhs) {
+    return pool_push_expr(pool, EXPR_POW,
+                          (ExprPayload){.binary = {
+                                            .lhs = lhs,
+                                            .rhs = rhs,
+                                        }});
+}
+
 static inline ExprIdx pool_push_neg(Pool *pool, ExprIdx unary) {
     return pool_push_expr(pool, EXPR_NEG, (ExprPayload){.unary = unary});
 }
@@ -267,6 +279,12 @@ static Token lexer_next(Lexer *lexer) {
 
     case '*':
         token.tag = TOK_MULTIPLY;
+        token.range.end = lexer->index;
+
+        break;
+
+    case '^':
+        token.tag = TOK_POWER;
         token.range.end = lexer->index;
 
         break;
@@ -326,6 +344,7 @@ typedef enum : uint8_t {
     PR_LOWEST,
     PR_SUM,
     PR_PRODUCT,
+    PR_POWER,
     PR_PREFIX,
 } Precedence;
 
@@ -338,6 +357,9 @@ static Precedence precedence_of(TokenTag token) {
     case TOK_MULTIPLY:
     case TOK_DIVIDE:
         return PR_PRODUCT;
+
+    case TOK_POWER:
+        return PR_POWER;
 
     default:
         return PR_LOWEST;
@@ -434,6 +456,8 @@ static ExprIdx parse_binary(Pool *pool, Lexer *lexer, ExprIdx lhs) {
         return parse_binary_op(pool, lexer, lhs, EXPR_MUL);
     case TOK_DIVIDE:
         return parse_binary_op(pool, lexer, lhs, EXPR_DIV);
+    case TOK_POWER:
+        return parse_binary_op(pool, lexer, lhs, EXPR_POW);
     default:
         return INVALID_EXPR_IDX;
     }
@@ -617,6 +641,31 @@ static ExprIdx simplify(Pool *pool, ExprIdx input) {
         }
     }
 
+    case EXPR_POW: {
+        ExprBinary binary = pool->payloads[input].binary;
+
+        ExprIdx lhs = simplify(pool, binary.lhs);
+        ExprIdx rhs = simplify(pool, binary.rhs);
+
+        if (pool->tags[lhs] == EXPR_VAL && pool->tags[rhs] == EXPR_VAL) {
+            return pool_push_val(
+                pool, pow(pool->payloads[lhs].val, pool->payloads[rhs].val));
+        } else if (pool->tags[rhs] == EXPR_VAL &&
+                   pool->payloads[rhs].val == 1) {
+            return lhs;
+        } else if (pool->tags[rhs] == EXPR_VAL &&
+                   pool->payloads[rhs].val == 0) {
+            return pool_push_val(pool, 1.0);
+        } else if (pool->tags[lhs] == EXPR_VAL &&
+                   pool->payloads[lhs].val == 0) {
+            return lhs;
+        } else if (lhs != binary.lhs || rhs != binary.rhs) {
+            return pool_push_pow(pool, lhs, rhs);
+        } else {
+            return input;
+        }
+    }
+
     case EXPR_NEG: {
         ExprIdx unary = simplify(pool, pool->payloads[input].unary);
 
@@ -742,6 +791,30 @@ static void display(Pool *pool, ExprIdx input) {
         break;
     }
 
+    case EXPR_POW: {
+        ExprBinary b = pool->payloads[input].binary;
+
+        if (is_binary_expr(pool, b.lhs)) {
+            printf("(");
+            display(pool, b.lhs);
+            printf(")");
+        } else {
+            display(pool, b.lhs);
+        }
+
+        printf(" ^ ");
+
+        if (is_binary_expr(pool, b.rhs)) {
+            printf("(");
+            display(pool, b.rhs);
+            printf(")");
+        } else {
+            display(pool, b.rhs);
+        }
+
+        break;
+    }
+
     case EXPR_NEG: {
         ExprIdx u = pool->payloads[input].unary;
 
@@ -785,6 +858,7 @@ static ExprIdx replace(Pool *pool, ExprIdx input, ExprVar var,
     case EXPR_SUB:
     case EXPR_MUL:
     case EXPR_DIV:
+    case EXPR_POW:
         return pool_push_expr(
             pool, pool->tags[input],
             (ExprPayload){
