@@ -500,6 +500,8 @@ static ExprIdx simplify(Pool *pool, ExprIdx input) {
             }
 
             return pool_push_mul(pool, pool_push_val(pool, a + 1), b);
+        } else if (pool->tags[rhs] == EXPR_NEG) {
+            return pool_push_sub(pool, lhs, pool->payloads[rhs].unary);
         } else if (lhs != binary.lhs || rhs != binary.rhs) {
             return pool_push_add(pool, lhs, rhs);
         } else {
@@ -549,6 +551,8 @@ static ExprIdx simplify(Pool *pool, ExprIdx input) {
             }
 
             return pool_push_mul(pool, pool_push_val(pool, a - 1), b);
+        } else if (pool->tags[rhs] == EXPR_NEG) {
+            return pool_push_add(pool, lhs, pool->payloads[rhs].unary);
         } else if (lhs != binary.lhs || rhs != binary.rhs) {
             return pool_push_sub(pool, lhs, rhs);
         } else {
