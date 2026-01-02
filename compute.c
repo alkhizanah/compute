@@ -93,8 +93,6 @@ static bool strings_equal(const char *lhs, uint32_t lhs_len, const char *rhs,
     return strncmp(lhs, rhs, lhs_len) == 0;
 }
 
-// This doesn't mean that they do not simplify into eachother, meaning (2 + 2)
-// != 4 structurally
 static bool exprs_structurally_equal(Pool *pool, ExprIdx lhs, ExprIdx rhs) {
     if (lhs == rhs)
         return true;
