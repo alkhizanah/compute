@@ -301,6 +301,9 @@ static Token lexer_next(Lexer *lexer) {
 
     default:
         if (isalpha(character) || character == '_') {
+            while (isalpha(lexer->buffer[lexer->index]))
+                lexer->index++;
+
             if (lexer->buffer[lexer->index] == '_') {
                 lexer->index++;
 
