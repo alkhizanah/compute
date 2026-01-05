@@ -1066,7 +1066,7 @@ int main() {
     linenoiseHistoryLoad(history_file_path);
 
     while (true) {
-        const char *line = linenoise(":> ");
+        const char *line = linenoise("> ");
 
         if (line == NULL) {
             if (errno == EAGAIN)
@@ -1107,8 +1107,18 @@ int main() {
         while (lexer_peek(&lexer).tag != TOK_EOF) {
             ExprIdx expr = parse(&pool, &lexer);
 
-            if (expr == INVALID_EXPR_IDX)
+            if (expr == INVALID_EXPR_IDX) {
+                printf("< %*.s^ SYNTAX ERROR\n", (int)lexer.index - 1, "");
                 break;
+            }
+
+            if (lexer_peek(&lexer).tag == TOK_INVALID) {
+                printf("< %*.s^ INVALID TOKEN\n",
+                       (int)lexer_next(&lexer).range.start, "");
+                break;
+            }
+
+            printf("< ");
 
             displayln(&pool, expr);
 
@@ -1121,10 +1131,6 @@ int main() {
 
                 expr = next_expr;
                 next_expr = simplify(&pool, expr);
-            }
-
-            if (lexer_peek(&lexer).tag != TOK_EOF) {
-                printf("\n");
             }
         }
     }
