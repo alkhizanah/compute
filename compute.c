@@ -582,7 +582,7 @@ static ExprIdx simplify_sub(Pool *pool, ExprIdx input) {
             return b.lhs;
         }
     } else if (pool->tags[rhs] == EXPR_ADD) {
-        ExprBinary b = pool->payloads[lhs].binary;
+        ExprBinary b = pool->payloads[rhs].binary;
 
         if (exprs_structurally_equal(pool, b.lhs, lhs)) {
             // x - (x + y) = -y
@@ -670,10 +670,6 @@ static ExprIdx simplify_mul(Pool *pool, ExprIdx input) {
             // (x ^ a) * x = x ^ (a + 1)
             return pool_push_pow(
                 pool, rhs, pool_push_add(pool, b.rhs, pool_push_val(pool, 1)));
-        } else if (exprs_structurally_equal(pool, b.rhs, rhs)) {
-            // (a ^ x) * x = x ^ (a + 1)
-            return pool_push_pow(
-                pool, rhs, pool_push_add(pool, b.lhs, pool_push_val(pool, 1)));
         }
     } else if (pool->tags[rhs] == EXPR_POW) {
         ExprBinary b = pool->payloads[rhs].binary;
@@ -682,10 +678,6 @@ static ExprIdx simplify_mul(Pool *pool, ExprIdx input) {
             // x * (x ^ a) = x ^ (a + 1)
             return pool_push_pow(
                 pool, lhs, pool_push_add(pool, b.rhs, pool_push_val(pool, 1)));
-        } else if (exprs_structurally_equal(pool, b.rhs, lhs)) {
-            // x * (a ^ x) = x ^ (a + 1)
-            return pool_push_pow(
-                pool, lhs, pool_push_add(pool, b.lhs, pool_push_val(pool, 1)));
         }
     }
 
